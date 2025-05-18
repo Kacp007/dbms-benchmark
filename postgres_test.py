@@ -7,7 +7,7 @@ import ast
 from psycopg2 import sql
 import gc  # Garbage collector - do zarządzania pamięcią
 import time
-
+from database_definition import DDL, INDEX_DDL
 
 DB_CONFIG = {
     'host': 'localhost',
@@ -33,112 +33,6 @@ CSV_PATHS = {
 RESULTS_FILE = get_abs_path('benchmark_results.txt')
 ENCODINGS = ['utf-8', 'latin1']
 
-# ----------------------------------------
-# Schema DDL
-# ----------------------------------------
-DDL = """
-CREATE TABLE IF NOT EXISTS players (
-    playerid INTEGER PRIMARY KEY,
-    nickname VARCHAR(100),
-    country VARCHAR(50)
-);
-
-CREATE TABLE IF NOT EXISTS games (
-    gameid INTEGER PRIMARY KEY,
-    title VARCHAR(100) NOT NULL,
-    platform VARCHAR(20),
-    release_date DATE
-);
-
-CREATE TABLE IF NOT EXISTS prices (
-    gameid INTEGER REFERENCES games(gameid) ON DELETE CASCADE,
-    usd NUMERIC(10,2),
-    eur NUMERIC(10,2),
-    gbp NUMERIC(10,2),
-    jpy NUMERIC(10,2),
-    rub NUMERIC(10,2),
-    date_acquired DATE NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS achievements (
-    achievementid VARCHAR(50) PRIMARY KEY,
-    gameid INTEGER REFERENCES games(gameid),
-    title TEXT,
-    description TEXT,
-    rarity VARCHAR(15) NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS history (
-    playerid INTEGER REFERENCES players(playerid) ON DELETE CASCADE,
-    achievementid VARCHAR(50) REFERENCES achievements(achievementid) ON DELETE CASCADE,
-    date_acquired TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS developers (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE
-);
-
-CREATE TABLE IF NOT EXISTS publishers (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE
-);
-
-CREATE TABLE IF NOT EXISTS genres (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE
-);
-
-CREATE TABLE IF NOT EXISTS supported_languages (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE
-);
-
-CREATE TABLE IF NOT EXISTS player_games (
-    player_id INTEGER REFERENCES players(playerid) ON DELETE CASCADE,
-    game_id INTEGER REFERENCES games(gameid) ON DELETE CASCADE,
-    UNIQUE(player_id, game_id)
-);
-
-CREATE TABLE IF NOT EXISTS game_developers (
-    game_id INTEGER REFERENCES games(gameid) ON DELETE CASCADE,
-    developer_id INTEGER REFERENCES developers(id) ON DELETE CASCADE,
-    UNIQUE(game_id, developer_id)
-);
-
-CREATE TABLE IF NOT EXISTS game_publishers (
-    game_id INTEGER REFERENCES games(gameid) ON DELETE CASCADE,
-    publisher_id INTEGER REFERENCES publishers(id) ON DELETE CASCADE,
-    UNIQUE(game_id, publisher_id)
-);
-
-CREATE TABLE IF NOT EXISTS game_genres (
-    game_id INTEGER REFERENCES games(gameid) ON DELETE CASCADE,
-    genre_id INTEGER REFERENCES genres(id) ON DELETE CASCADE,
-    UNIQUE(game_id, genre_id)
-);
-
-CREATE TABLE IF NOT EXISTS game_supported_languages (
-    game_id INTEGER REFERENCES games(gameid) ON DELETE CASCADE,
-    language_id INTEGER REFERENCES supported_languages(id) ON DELETE CASCADE,
-    UNIQUE(game_id, language_id)
-);
-"""
-
-INDEX_DDL = """
-CREATE INDEX IF NOT EXISTS idx_prices_gameid ON prices(gameid);
-CREATE INDEX IF NOT EXISTS idx_prices_date ON prices(date_acquired);
-CREATE INDEX IF NOT EXISTS idx_achievements_gameid ON achievements(gameid);
-CREATE INDEX IF NOT EXISTS idx_history_playerid ON history(playerid);
-CREATE INDEX IF NOT EXISTS idx_history_achievementid ON history(achievementid);
-CREATE INDEX IF NOT EXISTS idx_history_date ON history(date_acquired);
-CREATE INDEX IF NOT EXISTS idx_player_games_player_id ON player_games(player_id);
-CREATE INDEX IF NOT EXISTS idx_player_games_game_id ON player_games(game_id);
-CREATE INDEX IF NOT EXISTS idx_game_developers_game_id ON game_developers(game_id);
-CREATE INDEX IF NOT EXISTS idx_game_publishers_game_id ON game_publishers(game_id);
-CREATE INDEX IF NOT EXISTS idx_game_genres_game_id ON game_genres(game_id);
-CREATE INDEX IF NOT EXISTS idx_game_languages_game_id ON game_supported_languages(game_id);
-"""
 
 # ----------------------------------------
 # Helpers
@@ -182,6 +76,10 @@ def create_database():
                 print(f"Database {TARGET_DB} created successfully.")
             else:
                 print(f"Database {TARGET_DB} already exists.")
+
+            # Utwórz indeksy po stworzeniu tabel
+            print("\n=== TWORZENIE INDEKSÓW ===")
+            create_indexes()
     finally:
         conn.close()
 
@@ -264,11 +162,12 @@ def restore_postgres_settings():
     finally:
         conn.close()
 
+
 # ----------------------------------------
 # Bulk load base tables with encoding fallback and chunking
 # ----------------------------------------
 
-def load_base_csv(table, csv_path, columns):
+def load_base_csv(table, csv_path, columns, data_cap=10000000000000000):
     """Uses COPY FROM STDIN with column selection and chunking for large files."""
     total_rows = 0
     chunk_size = 10000000  # Rozmiar pojedynczej partii
@@ -295,7 +194,7 @@ def load_base_csv(table, csv_path, columns):
             
             # Przetwarzanie partiami
             chunk_count = 0
-            for chunk in pd.read_csv(csv_path, encoding=enc, chunksize=chunk_size):
+            for chunk in pd.read_csv(csv_path, encoding=enc, chunksize=chunk_size, nrows=data_cap):
                 chunk_count += 1
                 rows_in_chunk = len(chunk)
                 total_rows += rows_in_chunk
@@ -392,8 +291,8 @@ def parse_and_insert_list_field(csv_path, id_col, list_col, lookup_table, juncti
             return False
         
         # Przetwarzaj plik partiami
-        for chunk_idx, df in enumerate(pd.read_csv(csv_path, usecols=[id_col, list_col], 
-                                               encoding=encoding_to_use, chunksize=chunk_size)):
+        for chunk_idx, df in enumerate(pd.read_csv(csv_path, usecols=[id_col, list_col],
+                                                   encoding=encoding_to_use, chunksize=chunk_size)):
             chunk_count += 1
             rows_in_chunk = len(df)
             total_rows += rows_in_chunk
@@ -464,7 +363,7 @@ def parse_and_insert_list_field(csv_path, id_col, list_col, lookup_table, juncti
                                     lookup=sql.Identifier(lookup_table)
                                 ), (str(val),)
                             )
-                            
+
                             cur.execute(
                                 sql.SQL("SELECT id FROM {lookup} WHERE name=%s").format(
                                     lookup=sql.Identifier(lookup_table)
@@ -473,10 +372,11 @@ def parse_and_insert_list_field(csv_path, id_col, list_col, lookup_table, juncti
                             result = cur.fetchone()
                             if result:
                                 lk_id = result[0]
-                                
+
                                 # Dodaj do tabeli łączącej
                                 cur.execute(
-                                    sql.SQL("INSERT INTO {junction} ({fk1}, {fk2}) VALUES (%s, %s) ON CONFLICT DO NOTHING").format(
+                                    sql.SQL(
+                                        "INSERT INTO {junction} ({fk1}, {fk2}) VALUES (%s, %s) ON CONFLICT DO NOTHING").format(
                                         junction=sql.Identifier(junction_table),
                                         fk1=sql.Identifier(id_name),
                                         fk2=sql.Identifier(lookup_fk)
@@ -490,7 +390,8 @@ def parse_and_insert_list_field(csv_path, id_col, list_col, lookup_table, juncti
                         # Wstaw bezpośrednio do tabeli łączącej
                         try:
                             cur.execute(
-                                sql.SQL("INSERT INTO {junction} ({fk1}, {fk2}) VALUES (%s, %s) ON CONFLICT DO NOTHING").format(
+                                sql.SQL(
+                                    "INSERT INTO {junction} ({fk1}, {fk2}) VALUES (%s, %s) ON CONFLICT DO NOTHING").format(
                                     junction=sql.Identifier(junction_table),
                                     fk1=sql.Identifier(id_name),
                                     fk2=sql.Identifier(lookup_fk)
@@ -498,23 +399,23 @@ def parse_and_insert_list_field(csv_path, id_col, list_col, lookup_table, juncti
                             )
                         except Exception as e:
                             print(f"Błąd podczas wstawiania do tabeli {junction_table}: {str(e)}")
-                
+
                 counter += 1
                 if counter % 1000 == 0:
                     conn.commit()
-            
+
             # Zatwierdź zmiany na końcu każdej partii
             conn.commit()
-            
+
             # Wymuś czyszczenie pamięci
             del df
             gc.collect()
-            
+
             # Raportuj postęp
             elapsed = time.time() - start_time
             rows_per_second = total_rows / elapsed if elapsed > 0 else 0
             print(f"  Postęp: przetworzono {total_rows} wierszy, {rows_per_second:.1f} wierszy/s")
-        
+
         print(f"Zakończono przetwarzanie {junction_table}. Łącznie wierszy: {total_rows}")
         return True
     except Exception as e:
@@ -530,16 +431,17 @@ def parse_and_insert_list_field(csv_path, id_col, list_col, lookup_table, juncti
         if 'conn' in locals() and conn:
             conn.close()
 
+
 # ----------------------------------------
 # Full data load
 # ----------------------------------------
-def load_all():
+def load_all(data_cap):
     # Sprawdź, czy pliki istnieją przed rozpoczęciem ładowania
     missing_files = []
     for file_type, filename in CSV_PATHS.items():
         if not os.path.exists(filename):
             missing_files.append(f"{file_type}: {filename}")
-    
+
     if missing_files:
         print("BŁĄD: Następujące pliki nie istnieją:")
         for missing in missing_files:
@@ -549,23 +451,21 @@ def load_all():
         for item in os.listdir():
             print(f"  - {item}")
         return False
-    
+
     try:
         # Optymalizuj PostgreSQL przed ładowaniem
         optimize_postgres_for_bulk_load()
-    
+
         # Załaduj tabele bazowe
         print("\n=== ŁADOWANIE TABEL BAZOWYCH ===")
         load_base_csv('players', CSV_PATHS['players'], ['playerid', 'nickname', 'country'])
         load_base_csv('games', CSV_PATHS['games'], ['gameid', 'title', 'platform', 'release_date'])
-        load_base_csv('prices',  CSV_PATHS['prices'], ['gameid', 'usd', 'eur', 'gbp', 'jpy', 'rub', 'date_acquired'])
-        load_base_csv('achievements', CSV_PATHS['achievements'], ['achievementid', 'gameid', 'title', 'description', 'rarity'])
-        load_base_csv('history', CSV_PATHS['history'], ['playerid', 'achievementid', 'date_acquired'])
-        load_base_csv('player_games', get_abs_path('/cleaned/player_games_cleaned.csv'),['playerid','gameid'])
-        # Utwórz indeksy po załadowaniu danych bazowych
-        print("\n=== TWORZENIE INDEKSÓW ===")
-        create_indexes()
-        
+        load_base_csv('prices', CSV_PATHS['prices'], ['gameid', 'usd', 'eur', 'gbp', 'jpy', 'rub', 'date_acquired'])
+        load_base_csv('achievements', CSV_PATHS['achievements'],
+                      ['achievementid', 'gameid', 'title', 'description', 'rarity'])
+        load_base_csv('history', CSV_PATHS['history'], ['playerid', 'achievementid', 'date_acquired'], data_cap)
+        load_base_csv('player_games', get_abs_path('/cleaned/player_games_cleaned.csv'), ['playerid', 'gameid'])
+
         # Załaduj dane relacyjne
         print("\n=== ŁADOWANIE DANYCH RELACYJNYCH ===")
         cols = [
@@ -574,23 +474,25 @@ def load_all():
             ('genres', 'genres', 'game_genres', 'genre_id', 'game_id'),
             ('supported_languages', 'supported_languages', 'game_supported_languages', 'language_id', 'game_id')
         ]
-        
+
         for col, lookup, junction, fk, idn in cols:
             print(f"\nPrzetwarzanie relacji {col} -> {junction}...")
             parse_and_insert_list_field(CSV_PATHS['games'], 'gameid', col, lookup, junction, fk, idn)
-        
+
         print("\nPrzetwarzanie biblioteki gier graczy...")
-        parse_and_insert_list_field(CSV_PATHS['library'], 'playerid', 'library', None, 'player_games', 'game_id', 'player_id')
-        
+        parse_and_insert_list_field(CSV_PATHS['library'], 'playerid', 'library', None, 'player_games', 'game_id',
+                                    'player_id')
+
         # Przywróć normalne ustawienia PostgreSQL
         restore_postgres_settings()
-        
+
         return True
     except Exception as e:
         print(f"Błąd podczas ładowania danych: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
+
 
 # ----------------------------------------
 # Benchmark helper (writes to file)
@@ -608,6 +510,7 @@ def benchmark_query(conn, sql_text, params=None):
         f.write(f"--- QUERY ---\n{sql_text}\nExecution Time: {exec_time} ms\n{plan}\n\n")
     return exec_time, plan
 
+
 def run_benchmarks():
     conn = get_conn(TARGET_DB)
     tests = []
@@ -616,12 +519,12 @@ def run_benchmarks():
     # simple full‐table scans
     tests += [
         ("Select all players (small table)", "SELECT * FROM players;"),
-        ("Select first 10k players",      "SELECT * FROM players LIMIT 10000;"),
+        ("Select first 10k players", "SELECT * FROM players LIMIT 10000;"),
         ("Select 100k rows from history", "SELECT * FROM history LIMIT 100000;"),
     ]
     # selective predicates
     tests += [
-        ("Players from US",          "SELECT * FROM players WHERE country = 'US';"),
+        ("Players from US", "SELECT * FROM players WHERE country = 'US';"),
         ("Recent prices (last year)", "SELECT * FROM prices WHERE date_acquired >= CURRENT_DATE - INTERVAL '1 year';"),
     ]
     # joins
@@ -629,18 +532,18 @@ def run_benchmarks():
         ("Player → their games (1 join)",
          """
          SELECT p.playerid, p.nickname, g.title
-           FROM players p
-           JOIN player_games pg ON p.playerid = pg.player_id
-           JOIN games g          ON pg.game_id   = g.gameid;
+         FROM players p
+                  JOIN player_games pg ON p.playerid = pg.player_id
+                  JOIN games g ON pg.game_id = g.gameid;
          """),
         ("Full achievement chain (3 joins)",
          """
          SELECT p.nickname, g.title, a.title AS achievement
-           FROM players p
-           JOIN history h         ON p.playerid = h.playerid
-           JOIN achievements a    ON h.achievementid = a.achievementid
-           JOIN games g          ON a.gameid = g.gameid
-           WHERE h.date_acquired >= CURRENT_DATE - INTERVAL '30 days';
+         FROM players p
+                  JOIN history h ON p.playerid = h.playerid
+                  JOIN achievements a ON h.achievementid = a.achievementid
+                  JOIN games g ON a.gameid = g.gameid
+         WHERE h.date_acquired >= CURRENT_DATE - INTERVAL '30 days';
          """),
     ]
 
@@ -656,7 +559,7 @@ def run_benchmarks():
          """
          INSERT INTO players(playerid, nickname, country)
          SELECT 2000000 + gs, 'user_' || gs, 'XX'
-           FROM generate_series(1,10000) AS gs;
+         FROM generate_series(1, 10000) AS gs;
          """)
     ]
 
@@ -671,8 +574,8 @@ def run_benchmarks():
         ("Update 10k players to country 'ZZ'",
          """
          UPDATE players
-            SET country = 'ZZ'
-          WHERE playerid BETWEEN 2000001 AND 2010000;
+         SET country = 'ZZ'
+         WHERE playerid BETWEEN 2000001 AND 2010000;
          """)
     ]
 
@@ -696,17 +599,19 @@ def run_benchmarks():
         print(f"Execution time: {t} ms")
 
     conn.close()
+
+
 # ----------------------------------------
 # Main
 # ----------------------------------------
 if __name__ == '__main__':
-    
     parser = argparse.ArgumentParser(description='Load CSVs and prepare benchmarking DB')
     parser.add_argument('--load', action='store_true', help='Create schema and load data')
+    parser.add_argument('--data-cap', type=int, help='The maximum number of history rows to load', default=100000000)
     parser.add_argument('--check-connection', action='store_true', help='Check only database connection')
     parser.add_argument('--benchmark', action='store_true', help='Run benchmarks')
     args = parser.parse_args()
-    
+
     # Jeśli podano katalog z plikami CSV, zaktualizuj ścieżki
 
     if args.check_connection:
@@ -716,7 +621,7 @@ if __name__ == '__main__':
             conn = get_conn()
             conn.close()
             print("Połączenie z bazą postgres udane.")
-            
+
             # Sprawdź, czy istnieje baza benchmarkdb
             conn = get_conn()
             conn.autocommit = True
@@ -724,7 +629,7 @@ if __name__ == '__main__':
                 cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (TARGET_DB,))
                 exists = cur.fetchone()
             conn.close()
-            
+
             if exists:
                 try:
                     # Sprawdź połączenie z benchmarkdb
@@ -737,7 +642,7 @@ if __name__ == '__main__':
                 print(f"Baza danych {TARGET_DB} nie istnieje.")
         except Exception as e:
             print(f"Błąd połączenia: {str(e)}")
-    
+
     elif args.load:
         print("\n=== INICJALIZACJA BAZY DANYCH ===")
         print("Tworzenie bazy danych...")
@@ -745,7 +650,7 @@ if __name__ == '__main__':
         print("Tworzenie tabel...")
         create_tables()
         print("\n=== ŁADOWANIE DANYCH ===")
-        if load_all():
+        if load_all(int(args.data_cap)):
             print("\n=== SUKCES ===")
             print("Dane załadowane pomyślnie.")
         else:

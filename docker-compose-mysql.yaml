@@ -1,0 +1,15 @@
+services:
+
+  mysql-app:
+    image: "mysql:latest"
+    environment:
+      MYSQL_ROOT_PASSWORD: "example"
+      MYSQL_DATABASE: "bazy"
+      MYSQL_USER: "mysqluser"
+      MYSQL_PASSWORD: "example"
+    ports:
+      - "3306:3306"
+    volumes:
+          - ./mySqlData:/var/lib/mysql
+    networks:
+      - default
