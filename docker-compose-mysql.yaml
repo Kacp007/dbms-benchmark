@@ -4,7 +4,7 @@ services:
     image: "mysql:latest"
     environment:
       MYSQL_ROOT_PASSWORD: "example"
-      MYSQL_DATABASE: "bazy"
+      MYSQL_DATABASE: "benchmarkdb"
       MYSQL_USER: "mysqluser"
       MYSQL_PASSWORD: "example"
     ports:

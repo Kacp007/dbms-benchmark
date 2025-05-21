@@ -1,24 +1,33 @@
+import os
 import psycopg2
 from psycopg2 import sql
-import os
+from typing import Dict, Optional, Any, Union
 
 # Database configuration
-DB_CONFIG = {
+DB_CONFIG: Dict[str, Union[str, int]] = {
     'host': 'localhost',
     'port': 5432,
     'dbname': 'postgres', 
     'user': 'postgres',
     'password': 'admin'
 }
-TARGET_DB = 'benchmarkdb' 
-SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TARGET_DB: str = 'benchmarkdb' 
+SCRIPT_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def get_abs_path(filename):
+def get_abs_path(filename: str) -> str:
     """Returns absolute path for a given filename."""
     return os.path.join(SCRIPT_DIR, filename)
 
-def get_conn(dbname=None):
-    """Returns a new database connection using a DSN string to avoid encoding issues."""
+def get_conn(dbname: Optional[str] = None) -> psycopg2.extensions.connection:
+    """
+    Returns a new database connection using a DSN string to avoid encoding issues.
+    
+    Args:
+        dbname: Optional database name to connect to. If None, uses default from DB_CONFIG.
+        
+    Returns:
+        A new psycopg2 connection object.
+    """
     # Build DSN string explicitly (ASCII-safe)
     config = DB_CONFIG.copy()
     if dbname:
@@ -34,7 +43,7 @@ def get_conn(dbname=None):
     print(f"Connecting to database with DSN: {dsn}")
     return psycopg2.connect(dsn)
 
-def create_database():
+def create_database() -> None:
     """Create the benchmarkdb database if it doesn't exist."""
     # Connect to default postgres database
     conn = get_conn()
@@ -55,24 +64,24 @@ def create_database():
                 print(f"Database {TARGET_DB} created successfully.")
             else:
                 print(f"Database {TARGET_DB} already exists.")
-
-            # Utwórz indeksy po stworzeniu tabel
-            print("\n=== TWORZENIE INDEKSÓW ===")
-            from db.schema import create_indexes
-            create_indexes()
     finally:
         conn.close()
 
-def check_connection():
-    """Check database connection status."""
+def check_connection() -> bool:
+    """
+    Check database connection status.
+    
+    Returns:
+        True if connection is successful, False otherwise.
+    """
     try:
-        print("Sprawdzanie połączenia z bazą danych...")
-        # Najpierw połącz z domyślną bazą postgres
+        print("Checking database connection...")
+        # First connect to the default postgres database
         conn = get_conn()
         conn.close()
-        print("Połączenie z bazą postgres udane.")
+        print("Connection to postgres database successful.")
 
-        # Sprawdź, czy istnieje baza benchmarkdb
+        # Check if benchmarkdb exists
         conn = get_conn()
         conn.autocommit = True
         with conn.cursor() as cur:
@@ -82,15 +91,15 @@ def check_connection():
 
         if exists:
             try:
-                # Sprawdź połączenie z benchmarkdb
+                # Check connection to benchmarkdb
                 conn = get_conn(TARGET_DB)
                 conn.close()
-                print(f"Połączenie z bazą {TARGET_DB} udane.")
+                print(f"Connection to {TARGET_DB} database successful.")
             except Exception as e:
-                print(f"Nie można połączyć się z bazą {TARGET_DB}: {str(e)}")
+                print(f"Cannot connect to {TARGET_DB} database: {str(e)}")
         else:
-            print(f"Baza danych {TARGET_DB} nie istnieje.")
+            print(f"Database {TARGET_DB} does not exist.")
         return True
     except Exception as e:
-        print(f"Błąd połączenia: {str(e)}")
+        print(f"Connection error: {str(e)}")
         return False
