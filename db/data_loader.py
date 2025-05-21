@@ -13,8 +13,8 @@ from db.schema import optimize_postgres_for_bulk_load, restore_postgres_settings
 
 # CSV paths configuration with consistent path separators
 CSV_PATHS: Dict[str, str] = {
-    'players': get_abs_path('players.csv'),
-    'games': get_abs_path('games.csv'),
+    'players': get_abs_path('data/cleaned/players.csv'),
+    'games': get_abs_path('data/cleaned/games.csv'),
     'prices': get_abs_path('data/cleaned/prices_cleaned.csv'),
     'achievements': get_abs_path('data/cleaned/achievements_cleaned.csv'),
     'history': get_abs_path('data/cleaned/history_cleaned.csv'),
@@ -87,8 +87,13 @@ def load_base_csv(table: str, csv_path: str, columns: List[str], data_cap: int =
                             table=sql.Identifier(table),
                             cols=sql.SQL(cols)
                         )
-                        cur.copy_expert(copy, f)
-                    conn.commit()
+                        try:
+                            cur.copy_expert(copy, f)
+                        except psycopg2.errors.UniqueViolation as e:
+                            print(f"Duplicate key error while copying data: {str(e)}. Skipping and continuing.")
+                            conn.rollback()
+                        else:
+                            conn.commit()
                 except Exception as e:
                     print(f"Error copying data: {str(e)}")
                     conn.rollback()
@@ -320,12 +325,18 @@ def parse_and_insert_list_field(
             conn.close()
 
 
-def load_all(data_cap: int) -> bool:
+def load_all(
+    data_cap: int = 10000000, 
+    history_cap: Optional[int] = None, 
+    load_other_tables: bool = True
+) -> bool:
     """
     Load all data into the database.
     
     Args:
         data_cap: Maximum number of rows to load for large tables
+        history_cap: Specific cap for history records (overrides data_cap for history)
+        load_other_tables: Whether to load tables other than history
         
     Returns:
         True if all data was loaded successfully, False otherwise
@@ -350,32 +361,45 @@ def load_all(data_cap: int) -> bool:
         # Optimize PostgreSQL before loading
         optimize_postgres_for_bulk_load()
 
-        # Load base tables
-        print("\n=== LOADING BASE TABLES ===")
-        load_base_csv('players', CSV_PATHS['players'], ['playerid', 'nickname', 'country'])
-        load_base_csv('games', CSV_PATHS['games'], ['gameid', 'title', 'platform', 'release_date'])
-        load_base_csv('prices', CSV_PATHS['prices'], ['gameid', 'usd', 'eur', 'gbp', 'jpy', 'rub', 'date_acquired'])
-        load_base_csv('achievements', CSV_PATHS['achievements'],
-                  ['achievementid', 'gameid', 'title', 'description', 'rarity'])
-        load_base_csv('history', CSV_PATHS['history'], ['playerid', 'achievementid', 'date_acquired'], data_cap)
-        load_base_csv('player_games', CSV_PATHS['library'], ['playerid', 'gameid'])
+        if load_other_tables:
+            # Load base tables (excluding history if history_cap is provided)
+            print("\n=== LOADING BASE TABLES ===")
+            load_base_csv('players', CSV_PATHS['players'], ['playerid', 'nickname', 'country'])
+            load_base_csv('games', CSV_PATHS['games'], ['gameid', 'title', 'platform', 'release_date'])
+            load_base_csv('prices', CSV_PATHS['prices'], ['gameid', 'usd', 'eur', 'gbp', 'jpy', 'rub', 'date_acquired'])
+            load_base_csv('achievements', CSV_PATHS['achievements'],
+                      ['achievementid', 'gameid', 'title', 'description', 'rarity'])
+            load_base_csv('player_games', CSV_PATHS['library'], ['playerid', 'gameid'])
 
-        # Load relational data
-        print("\n=== LOADING RELATIONAL DATA ===")
-        cols = [
-            ('developers', 'developers', 'game_developers', 'developer_id', 'game_id'),
-            ('publishers', 'publishers', 'game_publishers', 'publisher_id', 'game_id'),
-            ('genres', 'genres', 'game_genres', 'genre_id', 'game_id'),
-            ('supported_languages', 'supported_languages', 'game_supported_languages', 'language_id', 'game_id')
-        ]
+            # Load relational data
+            print("\n=== LOADING RELATIONAL DATA ===")
+            cols = [
+                ('developers', 'developers', 'game_developers', 'developer_id', 'game_id'),
+                ('publishers', 'publishers', 'game_publishers', 'publisher_id', 'game_id'),
+                ('genres', 'genres', 'game_genres', 'genre_id', 'game_id'),
+                ('supported_languages', 'supported_languages', 'game_supported_languages', 'language_id', 'game_id')
+            ]
 
-        for col, lookup, junction, fk, idn in cols:
-            print(f"\nProcessing relation {col} -> {junction}...")
-            parse_and_insert_list_field(CSV_PATHS['games'], 'gameid', col, lookup, junction, fk, idn)
+            for col, lookup, junction, fk, idn in cols:
+                print(f"\nProcessing relation {col} -> {junction}...")
+                parse_and_insert_list_field(CSV_PATHS['games'], 'gameid', col, lookup, junction, fk, idn)
 
-        print("\nProcessing player game libraries...")
-        parse_and_insert_list_field(CSV_PATHS['library'], 'playerid', 'library', None, 'player_games', 'game_id',
-                                'player_id')
+            print("\nProcessing player game libraries...")
+            parse_and_insert_list_field(CSV_PATHS['library'], 'playerid', 'library', None, 'player_games', 'game_id',
+                                    'player_id')
+
+        # Load history with specific cap if provided
+        if history_cap is not None:
+            print(f"\n=== LOADING HISTORY (cap: {history_cap} rows) ===")
+            load_base_csv('history', CSV_PATHS['history'], 
+                         ['playerid', 'achievementid', 'date_acquired'], 
+                         history_cap)
+        elif load_other_tables:
+            # Load history with general data_cap if we're loading all tables
+            print(f"\n=== LOADING HISTORY (cap: {data_cap} rows) ===")
+            load_base_csv('history', CSV_PATHS['history'], 
+                         ['playerid', 'achievementid', 'date_acquired'], 
+                         data_cap)
 
         # Restore normal PostgreSQL settings
         restore_postgres_settings()

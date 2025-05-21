@@ -67,8 +67,8 @@ def generate_insert_query(scope: int = 1, table: str = "players") -> BenchmarkQu
         return BenchmarkQuery(
             f"Bulk insert {scope} rows into {table}",
             f"""
-            INSERT INTO {table}(nickname, country)
-            SELECT 'user_' || gs, 'XX'
+            INSERT INTO {table}(playerid, nickname, country)
+            SELECT gs, 'user_' || gs, 'XX'
             FROM generate_series(1, {scope}) AS gs;
             """
         )
@@ -85,20 +85,15 @@ def generate_update_query(scope: int = 1, table: str = "players") -> BenchmarkQu
     Returns:
         BenchmarkQuery object with the generated query
     """
-    if scope == 1:
-        return BenchmarkQuery(
-            f"Update single row in {table}",
-            f"UPDATE {table} SET country = 'DE' WHERE playerid = 9999999;"
-        )
-    else:
-        return BenchmarkQuery(
-            f"Update {scope} rows in {table}",
-            f"""
-            UPDATE {table}
-            SET country = 'ZZ'
-            WHERE playerid BETWEEN 2000001 AND {2000000 + scope};
+    return BenchmarkQuery(
+        f"Update {scope} rows in {table}",
+        f"""
+            UPDATE players
+            SET nickname = 'player nick 21',
+            country = 'xx';
             """
-        )
+    )
+
 
 
 def generate_delete_query(scope: int = 1, table: str = "players") -> BenchmarkQuery:
@@ -112,19 +107,13 @@ def generate_delete_query(scope: int = 1, table: str = "players") -> BenchmarkQu
     Returns:
         BenchmarkQuery object with the generated query
     """
-    if scope == 1:
-        return BenchmarkQuery(
-            f"Delete single row from {table}",
-            f"DELETE FROM {table} WHERE playerid = 9999999;"
-        )
-    else:
-        return BenchmarkQuery(
-            f"Delete {scope} rows from {table}",
-            f"""
-            DELETE FROM {table} 
-            WHERE playerid BETWEEN 2000001 AND {2000000 + scope};
+    return BenchmarkQuery(
+        f"Delete {scope} rows from {table}",
+        f"""
+            DELETE FROM {table}; 
             """
-        )
+    )
+
 
 
 def generate_complex_select_query(join_count: int = 1) -> BenchmarkQuery:
