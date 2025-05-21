@@ -10,6 +10,6 @@ services:
     ports:
       - "3306:3306"
     volumes:
-          - ./mySqlData:/var/lib/mysql
+          - ./db_servers_data/mySqlData:/var/lib/mysql
     networks:
       - default
