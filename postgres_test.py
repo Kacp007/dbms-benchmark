@@ -45,7 +45,7 @@ def main() -> None:
     
     # Default scopes for CUD benchmarks if not specified
     default_cud_scopes = [10, 100, 1000, 10000, 100000, 1000000, 10000000]
-    default_cud_scopes = [10, 100, 1000, 10000]
+    #default_cud_scopes = [10, 100, 1000, 10000]
 
     if args.check_connection:
         check_connection()
