@@ -1,0 +1,15 @@
+services:
+
+  mysql-app:
+    image: "mysql:latest"
+    environment:
+      MYSQL_ROOT_PASSWORD: "example"
+      MYSQL_DATABASE: "benchmarkdb"
+      MYSQL_USER: "mysqluser"
+      MYSQL_PASSWORD: "example"
+    ports:
+      - "3306:3306"
+    volumes:
+          - ./db_servers_data/mySqlData:/var/lib/mysql
+    networks:
+      - default
