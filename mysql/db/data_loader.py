@@ -5,11 +5,10 @@ import time
 import gc  # Garbage collector for memory management
 from typing import Dict, List, Any, Optional, Union, Tuple
 import pandas as pd
-import psycopg2
-from psycopg2 import sql
+import mysql.connector
+from mysql.connector import Error
 
 from db.connection import get_conn, TARGET_DB, get_abs_path
-from db.schema import optimize_postgres_for_bulk_load, restore_postgres_settings
 
 # CSV paths configuration with consistent path separators
 CSV_PATHS: Dict[str, str] = {
@@ -73,38 +72,59 @@ def load_base_csv(table: str, csv_path: str, columns: List[str], data_cap: int =
                 # Select only needed columns
                 chunk_filtered = chunk[columns]
                 
-                # Save to temporary CSV file
-                temp_csv = f"temp_{table}_{chunk_count}.csv"
-                chunk_filtered.to_csv(temp_csv, index=False)
-                
-                # Use COPY for filtered file
+                # Insert data using MySQL bulk insert with sub-batching
                 conn = get_conn(TARGET_DB)
                 try:
                     cur = conn.cursor()
-                    with open(temp_csv, 'r', encoding='utf-8') as f:
-                        cols = ','.join(columns)
-                        copy = sql.SQL("COPY {table} ({cols}) FROM STDIN WITH CSV HEADER").format(
-                            table=sql.Identifier(table),
-                            cols=sql.SQL(cols)
-                        )
+                    
+                    # Prepare bulk insert statement
+                    placeholders = ', '.join(['%s'] * len(columns))
+                    insert_sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
+                    
+                    # Convert DataFrame to list of tuples for bulk insert
+                    data_tuples = []
+                    for _, row in chunk_filtered.iterrows():
+                        # Handle NaN values by converting to None
+                        row_data = []
+                        for value in row:
+                            if pd.isna(value):
+                                row_data.append(None)
+                            else:
+                                row_data.append(value)
+                        data_tuples.append(tuple(row_data))
+                    
+                    # Process in smaller sub-batches to avoid max_allowed_packet limit
+                    sub_batch_size = 5000  # Smaller batch size for executemany
+                    total_inserted = 0
+                    
+                    for i in range(0, len(data_tuples), sub_batch_size):
+                        sub_batch = data_tuples[i:i + sub_batch_size]
                         try:
-                            cur.copy_expert(copy, f)
-                        except psycopg2.errors.UniqueViolation as e:
-                            print(f"Duplicate key error while copying data: {str(e)}. Skipping and continuing.")
+                            cur.executemany(insert_sql, sub_batch)
+                            total_inserted += len(sub_batch)
+                            if total_inserted % 50000 == 0:  # Progress reporting
+                                print(f"    Inserted {total_inserted}/{len(data_tuples)} rows...")
+                        except mysql.connector.IntegrityError as e:
+                            print(f"Duplicate key error in sub-batch {i//sub_batch_size + 1}: {str(e)}. Continuing...")
                             conn.rollback()
-                        else:
-                            conn.commit()
+                            continue
+                        except Exception as e:
+                            print(f"Error inserting sub-batch {i//sub_batch_size + 1}: {str(e)}")
+                            conn.rollback()
+                            raise
+                    
+                    conn.commit()
+                    print(f"    Successfully inserted {total_inserted} rows")
+                        
                 except Exception as e:
-                    print(f"Error copying data: {str(e)}")
+                    print(f"Error during bulk insert: {str(e)}")
                     conn.rollback()
                     raise
                 finally:
                     cur.close()
                     conn.close()
                 
-                # Remove temporary file
-                if os.path.exists(temp_csv):
-                    os.remove(temp_csv)
+                # No temporary file to remove in MySQL approach
                 
                 # Force memory cleanup
                 del chunk, chunk_filtered
@@ -122,11 +142,6 @@ def load_base_csv(table: str, csv_path: str, columns: List[str], data_cap: int =
             print(f"Failed to decode {csv_path} with encoding {enc}, trying next...")
         except Exception as e:
             print(f"Error loading {table}: {str(e)}")
-            if 'temp_csv' in locals() and os.path.exists(temp_csv):
-                try:
-                    os.remove(temp_csv)
-                except:
-                    pass
             raise
     
     print(f"ERROR: Cannot read {csv_path} with any of the encodings {ENCODINGS}")
@@ -252,15 +267,13 @@ def parse_and_insert_list_field(
                         # Create or find value in lookup table
                         try:
                             cur.execute(
-                                sql.SQL("INSERT INTO {lookup} (name) VALUES (%s) ON CONFLICT (name) DO NOTHING").format(
-                                    lookup=sql.Identifier(lookup_table)
-                                ), (str(val),)
+                                f"INSERT INTO {lookup_table} (name) VALUES (%s) ON DUPLICATE KEY UPDATE name=name", 
+                                (str(val),)
                             )
 
                             cur.execute(
-                                sql.SQL("SELECT id FROM {lookup} WHERE name=%s").format(
-                                    lookup=sql.Identifier(lookup_table)
-                                ), (str(val),)
+                                f"SELECT id FROM {lookup_table} WHERE name=%s", 
+                                (str(val),)
                             )
                             result = cur.fetchone()
                             if result:
@@ -268,12 +281,8 @@ def parse_and_insert_list_field(
 
                                 # Add to junction table
                                 cur.execute(
-                                    sql.SQL(
-                                        "INSERT INTO {junction} ({fk1}, {fk2}) VALUES (%s, %s) ON CONFLICT DO NOTHING").format(
-                                        junction=sql.Identifier(junction_table),
-                                        fk1=sql.Identifier(id_name),
-                                        fk2=sql.Identifier(lookup_fk)
-                                    ), (entity_id, lk_id)
+                                    f"INSERT INTO {junction_table} ({id_name}, {lookup_fk}) VALUES (%s, %s) ON DUPLICATE KEY UPDATE {id_name}={id_name}", 
+                                    (entity_id, lk_id)
                                 )
                             else:
                                 print(f"WARNING: ID not found for value '{val}' in table {lookup_table}")
@@ -283,12 +292,8 @@ def parse_and_insert_list_field(
                         # Insert directly into junction table
                         try:
                             cur.execute(
-                                sql.SQL(
-                                    "INSERT INTO {junction} ({fk1}, {fk2}) VALUES (%s, %s) ON CONFLICT DO NOTHING").format(
-                                    junction=sql.Identifier(junction_table),
-                                    fk1=sql.Identifier(id_name),
-                                    fk2=sql.Identifier(lookup_fk)
-                                ), (entity_id, val)
+                                f"INSERT INTO {junction_table} ({id_name}, {lookup_fk}) VALUES (%s, %s) ON DUPLICATE KEY UPDATE {id_name}={id_name}", 
+                                (entity_id, val)
                             )
                         except Exception as e:
                             print(f"Error inserting into {junction_table} table: {str(e)}")
@@ -358,8 +363,9 @@ def load_all(
         return False
 
     try:
-        # Optimize PostgreSQL before loading
-        optimize_postgres_for_bulk_load()
+        # Optimize MySQL before loading
+        from db.schema import optimize_mysql_for_bulk_load
+        optimize_mysql_for_bulk_load()
 
         if load_other_tables:
             # Load base tables (excluding history if history_cap is provided)
@@ -377,7 +383,7 @@ def load_all(
                 ('developers', 'developers', 'game_developers', 'developer_id', 'game_id'),
                 ('publishers', 'publishers', 'game_publishers', 'publisher_id', 'game_id'),
                 ('genres', 'genres', 'game_genres', 'genre_id', 'game_id'),
-                ('supported_languages', 'supported_languages', 'game_supported_languages', 'language_id', 'game_id')
+                # ('supported_languages', 'supported_languages', 'game_supported_languages', 'language_id', 'game_id')
             ]
 
             for col, lookup, junction, fk, idn in cols:
@@ -401,8 +407,9 @@ def load_all(
                          ['playerid', 'achievementid', 'date_acquired'], 
                          data_cap)
 
-        # Restore normal PostgreSQL settings
-        restore_postgres_settings()
+        # Restore normal MySQL settings
+        from db.schema import restore_mysql_settings
+        restore_mysql_settings()
 
         return True
     except Exception as e:

@@ -1,47 +1,64 @@
+import math
+
 from db import generate_select_query, generate_complex_select_query, BenchmarkQuery
 from db.connection import get_conn, TARGET_DB, get_abs_path
 from db.benchmark_utils import ensure_database_initialized, create_csv_file, RESULTS_DIR, benchmark_query, \
     add_benchmark_result, truncate_all_tables
 from typing import Tuple, List, Any, Optional
 import os
-import psycopg2
-from db.data_loader import load_all
 from datetime import datetime
 
 RESULTS_FILE = os.path.join(RESULTS_DIR, 'benchmark_select_results.txt')
 
 
-def load_data_for_select_benchmark(conn: psycopg2.extensions.connection, scope: int) -> None:
-    """Load data for SELECT benchmark."""
-    import csv
+import csv
+from psycopg2.extras import execute_values
+
+
+def load_data_for_select_benchmark(conn, scope: int, batch_size: int = 5000) -> None:
+    """Batch insert data into MySQL 'history' table with progress logging."""
+    import logging
+    logging.basicConfig(level=logging.INFO)
+
     history_csv = get_abs_path('data/cleaned/history_cleaned.csv')
     rows = []
+
+    # Load data from CSV
     with open(history_csv, 'r', encoding='utf-8') as f:
         reader = csv.reader(f)
         first_row = next(reader)
-        # Check if first row is header (contains column names)
-        if all(x.lower() in ['playerid', 'achievementid', 'date_acquired'] for x in first_row):
-            # skip header, read up to scope rows
-            for i, row in enumerate(reader):
-                if i >= scope:
-                    break
-                rows.append(row)
-        else:
-            # first row is data
+        has_header = all(x.lower() in ['playerid', 'achievementid', 'date_acquired'] for x in first_row)
+        if not has_header:
             rows.append(first_row)
-            for i, row in enumerate(reader):
-                if i >= scope - 1:
-                    break
-                rows.append(row)
-    # Insert into history table
+
+        for i, row in enumerate(reader):
+            if i >= (scope - len(rows)):
+                break
+            rows.append(row)
+
+    total_rows = len(rows)
+    total_batches = math.ceil(total_rows / batch_size)
+
+    logging.info(f"Starting batch insert of {total_rows} rows in {total_batches} batches (batch size: {batch_size})")
+
     with conn.cursor() as cur:
-        cur.execute('TRUNCATE TABLE history;')
-        for row in rows:
-            cur.execute(
-                'INSERT INTO history (playerid, achievementid, date_acquired) VALUES (%s, %s, %s);',
-                row
+        cur.execute("TRUNCATE TABLE history;")
+
+        for batch_num in range(total_batches):
+            start = batch_num * batch_size
+            end = start + batch_size
+            chunk = rows[start:end]
+
+            cur.executemany(
+                "INSERT INTO history (playerid, achievementid, date_acquired) VALUES (%s, %s, %s)",
+                chunk
             )
+
+            logging.info(f"Inserted batch {batch_num + 1}/{total_batches} ({len(chunk)} rows)")
+
         conn.commit()
+        logging.info("Data insertion completed.")
+
 
 
 def run_select_benchmarks(scopes: List[int] = None) -> bool:

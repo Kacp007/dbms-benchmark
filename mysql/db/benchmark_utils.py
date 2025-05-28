@@ -2,7 +2,7 @@ import csv
 import os
 from typing import Optional, Tuple, Any, List
 
-import psycopg2
+import mysql.connector
 
 from db import get_conn, TARGET_DB, create_database, create_tables, create_indexes, get_abs_path
 #from db.benchmark import CSV_RESULTS_FILE
@@ -34,34 +34,30 @@ def create_csv_file(filename: str) -> None:
 RESULTS_DIR = get_abs_path('results')
 
 
+import time
+from typing import Optional, Tuple, Any
+import mysql.connector
+
 def benchmark_query(
-    conn: psycopg2.extensions.connection,
-    sql_text: str,
-    params: Optional[Tuple[Any, ...]] = None
+        conn: mysql.connector.connection.MySQLConnection,
+        sql_text: str,
+        params: Optional[Tuple[Any, ...]] = None
 ) -> Tuple[Optional[float], str]:
-    """Execute a query and record its execution time using EXPLAIN ANALYZE."""
+    """Execute a query and record its execution time in milliseconds (MySQL version)."""
     try:
         with conn.cursor() as cur:
-            # Always use EXPLAIN ANALYZE for all queries
-            cur.execute('EXPLAIN ANALYZE ' + sql_text, params or ())
-            rows = cur.fetchall()
-            plan = '\n'.join(r[0] for r in rows)
-            exec_time = None
-            # Find the line with 'Execution Time' and extract the value
-            for r in rows:
-                line = r[0]
-                if 'Execution Time' in line:
-                    try:
-                        exec_time = float(line.split('Execution Time:')[1].split('ms')[0].strip())
-                    except Exception:
-                        pass
+            start = time.perf_counter()
+            cur.execute(sql_text, params or ())
+            if cur.with_rows:
+                cur.fetchall()
+            end = time.perf_counter()
+            exec_time = (end - start) * 1000  # convert to ms
     except Exception as e:
         print(f"Error executing query: {e}")
         raise
 
-    print(f"--- QUERY ---\n{sql_text}\nExecution Time: {exec_time} ms\n{plan}\n\n")
-
-    return exec_time, plan
+    #print(f"--- QUERY ---\n{sql_text}\nExecution Time: {exec_time:.3f} ms\n")
+    return exec_time, ""
 
 
 def add_benchmark_result(
@@ -88,7 +84,7 @@ def ensure_results_dir() -> None:
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
-def truncate_all_tables(conn: psycopg2.extensions.connection, table: Optional[List[str]] = None) -> None:
+def truncate_all_tables(conn: mysql.connector.MySQLConnection, table: Optional[List[str]] = None) -> None:
     """Truncate all tables in the database."""
     tables = [
         'history', 'player_games', 'game_developers', 'game_publishers',
@@ -98,14 +94,14 @@ def truncate_all_tables(conn: psycopg2.extensions.connection, table: Optional[Li
     ] if table is None else table
 
     with conn.cursor() as cur:
-        # Disable triggers temporarily
-        cur.execute("SET session_replication_role = 'replica';")
+        # Disable foreign key checks temporarily
+        cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
 
         # Truncate each table
-        for table in tables:
-            cur.execute(f"TRUNCATE TABLE {table} CASCADE;")
+        for table_name in tables:
+            cur.execute(f"TRUNCATE TABLE {table_name};")
 
-        # Re-enable triggers
-        cur.execute("SET session_replication_role = 'origin';")
+        # Re-enable foreign key checks
+        cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
 
     conn.commit()

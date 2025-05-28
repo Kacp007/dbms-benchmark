@@ -1,5 +1,5 @@
 from typing import Optional
-import psycopg2
+import mysql.connector
 
 from database_definition import DDL, INDEX_DDL
 from db.connection import get_conn, TARGET_DB
@@ -25,79 +25,114 @@ def create_indexes() -> None:
     """
     Create all indexes in the database using INDEX_DDL from database_definition.
     
-    Creates indexes based on the INDEX_DDL constant from database_definition module.
+    Checks if each index exists before creating it to avoid MySQL syntax errors.
     """
     conn = get_conn(TARGET_DB)
     try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(INDEX_DDL)
-        print("Indexes created.")
+        with conn.cursor() as cur:
+            # Parse individual CREATE INDEX statements from INDEX_DDL
+            index_statements = [stmt.strip() for stmt in INDEX_DDL.strip().split(';') if stmt.strip()]
+            
+            for statement in index_statements:
+                if statement.startswith('CREATE INDEX'):
+                    # Extract index name and table name from statement
+                    # Format: CREATE INDEX index_name ON table_name(columns)
+                    parts = statement.split()
+                    index_name = parts[2]  # index name
+                    table_name = parts[4].split('(')[0]  # table name before (
+                    
+                    # Check if index already exists
+                    cur.execute("""
+                        SELECT COUNT(*) 
+                        FROM information_schema.statistics 
+                        WHERE table_schema = %s 
+                        AND table_name = %s 
+                        AND index_name = %s
+                    """, (TARGET_DB, table_name, index_name))
+                    
+                    exists = cur.fetchone()[0] > 0
+                    
+                    if not exists:
+                        try:
+                            cur.execute(statement)
+                            print(f"Created index: {index_name}")
+                        except mysql.connector.Error as e:
+                            print(f"Error creating index {index_name}: {e}")
+                    else:
+                        print(f"Index {index_name} already exists, skipping.")
+            
+        conn.commit()
+        print("Index creation completed.")
     finally:
         conn.close()
 
 
-def optimize_postgres_for_bulk_load() -> None:
+def optimize_mysql_for_bulk_load() -> None:
     """
-    Optimize PostgreSQL parameters for loading large datasets.
+    Optimize MySQL parameters for loading large datasets.
     
-    Increases work memory, maintenance memory, disables autovacuum,
-    and makes other optimizations to speed up bulk data loading.
+    Disables unique checks, foreign key checks, and autocommit
+    to speed up bulk data loading.
     """
     conn = get_conn(TARGET_DB)
     try:
-        with conn:
-            with conn.cursor() as cur:
-                # Increase work memory
-                cur.execute("SET work_mem = '256MB'")
-                
-                # Disable autovacuum during loading
-                cur.execute("ALTER TABLE players SET (autovacuum_enabled = false)")
-                cur.execute("ALTER TABLE games SET (autovacuum_enabled = false)")
-                cur.execute("ALTER TABLE prices SET (autovacuum_enabled = false)")
-                cur.execute("ALTER TABLE achievements SET (autovacuum_enabled = false)")
-                cur.execute("ALTER TABLE history SET (autovacuum_enabled = false)")
-                
-                # Other optimizations
-                cur.execute("SET maintenance_work_mem = '1GB'")  # Speed up index creation
-                cur.execute("SET max_wal_size = '4GB'")          # Increase WAL size, fewer flushes
-                cur.execute("ALTER TABLE prices DISABLE TRIGGER ALL")
-        print("PostgreSQL optimized for bulk loading.")
+        with conn.cursor() as cur:
+            # Disable foreign key checks
+            cur.execute("SET foreign_key_checks = 0")
+            
+            # Disable unique checks
+            cur.execute("SET unique_checks = 0")
+            
+            # Disable autocommit for better performance
+            conn.autocommit = False
+            
+            # Increase bulk insert buffer size
+            cur.execute("SET bulk_insert_buffer_size = 256*1024*1024")
+            
+            # Disable binlog for session
+            cur.execute("SET sql_log_bin = 0")
+            
+        conn.commit()
+        print("MySQL optimized for bulk loading.")
     except Exception as e:
-        print(f"Error while optimizing PostgreSQL: {str(e)}")
+        print(f"Error while optimizing MySQL: {str(e)}")
     finally:
         conn.close()
 
 
-def restore_postgres_settings() -> None:
+def restore_mysql_settings() -> None:
     """
     Restore normal settings after data loading.
     
-    Re-enables autovacuum, enables triggers, and runs VACUUM ANALYZE
-    to improve query planning after bulk data loading.
+    Re-enables foreign key checks, unique checks, and autocommit.
+    Runs ANALYZE TABLE to update statistics for better query planning.
     """
     conn = get_conn(TARGET_DB)
     try:
-        with conn:
-            with conn.cursor() as cur:
-                # Re-enable autovacuum
-                try:
-                    cur.execute("ALTER TABLE players SET (autovacuum_enabled = true)")
-                    cur.execute("ALTER TABLE games SET (autovacuum_enabled = true)")
-                    cur.execute("ALTER TABLE prices SET (autovacuum_enabled = true)")
-                    cur.execute("ALTER TABLE achievements SET (autovacuum_enabled = true)")
-                    cur.execute("ALTER TABLE history SET (autovacuum_enabled = true)")
-                    cur.execute("ALTER TABLE prices ENABLE TRIGGER ALL")
-                except Exception as e:
-                    print(f"Warning when restoring autovacuum: {str(e)}")
+        with conn.cursor() as cur:
+            # Re-enable foreign key checks
+            try:
+                cur.execute("SET foreign_key_checks = 1")
+                cur.execute("SET unique_checks = 1")
+                cur.execute("SET sql_log_bin = 1")
+                conn.autocommit = True
+            except Exception as e:
+                print(f"Warning when restoring checks: {str(e)}")
+            
+            # Update table statistics for better query plans
+            try:
+                tables = ['players', 'games', 'prices', 'achievements', 'history',
+                         'developers', 'publishers', 'genres', 'supported_languages',
+                         'player_games', 'game_developers', 'game_publishers', 
+                         'game_genres', 'game_supported_languages']
+                for table in tables:
+                    cur.execute(f"ANALYZE TABLE {table}")
+            except Exception as e:
+                print(f"Warning when executing ANALYZE: {str(e)}")
                 
-                # Run VACUUM ANALYZE for better query plans
-                try:
-                    cur.execute("VACUUM ANALYZE")
-                except Exception as e:
-                    print(f"Warning when executing VACUUM: {str(e)}")
-        print("Restored normal PostgreSQL settings and ran VACUUM ANALYZE.")
+        conn.commit()
+        print("Restored normal MySQL settings and ran ANALYZE TABLE.")
     except Exception as e:
-        print(f"Error while restoring PostgreSQL settings: {str(e)}")
+        print(f"Error while restoring MySQL settings: {str(e)}")
     finally:
         conn.close()

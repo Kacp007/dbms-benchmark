@@ -58,20 +58,15 @@ def generate_insert_query(scope: int = 1, table: str = "players") -> BenchmarkQu
     Returns:
         BenchmarkQuery object with the generated query
     """
-    if scope == 1:
-        return BenchmarkQuery(
-            f"Insert single row into {table}",
-            f"INSERT INTO {table}(playerid, nickname, country) VALUES (9999999, 'bench_user', 'PL');"
-        )
-    else:
-        return BenchmarkQuery(
-            f"Bulk insert {scope} rows into {table}",
-            f"""
-            INSERT INTO {table}(playerid, nickname, country)
-            SELECT gs, 'user_' || gs, 'XX'
-            FROM generate_series(1, {scope}) AS gs;
-            """
-        )
+    rows = ",\n".join(
+        f"({i}, 'user_{i}', 'XX')" for i in range(1, scope + 1)
+    )
+    sql = f"INSERT INTO {table}(playerid, nickname, country) VALUES\n{rows};"
+    return BenchmarkQuery(
+        f"Bulk insert {scope} rows into {table}",
+        sql
+    )
+
 
 
 def generate_update_query(scope: int = 1, table: str = "players") -> BenchmarkQuery:
