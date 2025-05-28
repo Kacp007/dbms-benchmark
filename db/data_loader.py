@@ -326,8 +326,8 @@ def parse_and_insert_list_field(
 
 
 def load_all(
-    data_cap: int = 10000000, 
-    history_cap: Optional[int] = None, 
+    data_cap: int = 1000000000000,
+    history_cap: Optional[int] = 0,
     load_other_tables: bool = True
 ) -> bool:
     """

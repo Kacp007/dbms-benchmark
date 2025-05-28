@@ -10,7 +10,8 @@ from typing import Optional, List
 from db.connection import create_database, check_connection
 from db.schema import create_tables, create_indexes
 from db.data_loader import load_all
-from db.benchmark import run_benchmarks, run_cud_benchmarks, run_select_benchmarks, RESULTS_FILE, CSV_RESULTS_FILE
+from db.benchmark import run_benchmarks, run_cud_benchmarks, CSV_RESULTS_FILE
+from db.benchmark_select import run_select_benchmarks
 
 
 def main() -> None:
