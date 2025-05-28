@@ -59,7 +59,7 @@ def benchmark_query(
         print(f"Error executing query: {e}")
         raise
 
-    print(f"--- QUERY ---\n{sql_text}\nExecution Time: {exec_time} ms\n{plan}\n\n")
+    #print(f"--- QUERY ---\n{sql_text}\nExecution Time: {exec_time} ms\n{plan}\n\n")
 
     return exec_time, plan
 

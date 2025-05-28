@@ -7,6 +7,7 @@ import os
 import psycopg2
 from db.data_loader import load_all
 from datetime import datetime
+from psycopg2.extras import execute_values
 
 RESULTS_FILE = os.path.join(RESULTS_DIR, 'benchmark_select_results.txt')
 
@@ -36,12 +37,20 @@ def load_data_for_select_benchmark(conn: psycopg2.extensions.connection, scope: 
     # Insert into history table
     with conn.cursor() as cur:
         cur.execute('TRUNCATE TABLE history;')
-        for row in rows:
-            cur.execute(
-                'INSERT INTO history (playerid, achievementid, date_acquired) VALUES (%s, %s, %s);',
-                row
+        print("Truncated history table.")
+
+
+        # Adjust batch size depending on memory
+        batch_size = 500000
+        for i in range(0, len(rows), batch_size):
+            print(f"Inserting rows {i} to {i + batch_size} into history table... inserted {len(rows[i:i + batch_size])} rows")
+            batch = rows[i:i + batch_size]
+            execute_values(
+                cur,
+                'INSERT INTO history (playerid, achievementid, date_acquired) VALUES %s',
+                batch
             )
-        conn.commit()
+            conn.commit()
 
 
 def run_select_benchmarks(scopes: List[int] = None) -> bool:
@@ -68,6 +77,7 @@ def run_select_benchmarks(scopes: List[int] = None) -> bool:
             bit_complex_time_sum = 0
             complex_time_sum = 0
 
+            print(f"\nPreparing data for scope: {scope} rows")
             load_data_for_select_benchmark(conn, scope)
             print(f"\n=== BENCHMARKING SCOPE: {scope} ===")
             for _ in range(3):
