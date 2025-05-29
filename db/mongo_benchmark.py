@@ -212,7 +212,8 @@ def save_benchmark_results(results: List[Dict[str, Any]], output_file: str = Non
 
 def run_crud_benchmarks(db: Database, scopes: List[int] = None, sample_size: int = 5) -> List[Dict[str, Any]]:
     """
-    Run CRUD (Create, Read, Update, Delete) benchmarks.
+    Run CRUD (Create, Read, Update, Delete) benchmarks following PostgreSQL pattern.
+    For each scope: runs CREATE → UPDATE → DELETE in sequence for each sample.
     
     Args:
         db: MongoDB database object
@@ -227,13 +228,16 @@ def run_crud_benchmarks(db: Database, scopes: List[int] = None, sample_size: int
     
     print(f"Running MongoDB CRUD benchmarks with scopes: {scopes}")
     
-    # Clean up any existing benchmark data before starting
-    cleanup_benchmark_data(db)
-    
     results = []
     
-    # Read operations
+    # First run Read operations separately (they don't modify data)
+    print("Running READ benchmarks...")
     for scope in scopes:
+        # Ensure we have data to read
+        cleanup_benchmark_data(db)
+        insert_query = generate_insert_many_query(scope, "players")
+        execute_single_mongo_query(db, insert_query)
+        
         # Simple find
         query = generate_find_query(scope, "players")
         result = execute_mongo_query(db, query, sample_size)
@@ -244,35 +248,70 @@ def run_crud_benchmarks(db: Database, scopes: List[int] = None, sample_size: int
         result = execute_mongo_query(db, query, sample_size)
         results.append(result)
     
-    # Create operations
-    for scope in [1, 10, 100, 1000]:
-        if scope == 1:
-            query = generate_insert_one_query("players")
-        else:
-            query = generate_insert_many_query(scope, "players")
+    # Now run CUD operations in sequence for each scope
+    print("Running CUD (Create-Update-Delete) benchmarks...")
+    for scope in scopes:
+        print(f"\n=== BENCHMARKING CUD SCOPE: {scope} ===")
         
-        result = execute_mongo_query(db, query, sample_size)
-        results.append(result)
-    
-    # Update operations
-    query = generate_update_one_query("players")
-    result = execute_mongo_query(db, query, sample_size)
-    results.append(result)
-    
-    for scope in [10, 100, 1000]:
-        query = generate_update_many_query(scope, "players")
-        result = execute_mongo_query(db, query, sample_size)
-        results.append(result)
-    
-    # Delete operations
-    query = generate_delete_one_query("players")
-    result = execute_mongo_query(db, query, sample_size)
-    results.append(result)
-    
-    for scope in [10, 100, 1000]:
-        query = generate_delete_many_query(scope, "players")
-        result = execute_mongo_query(db, query, sample_size)
-        results.append(result)
+        # Track execution times for each operation type
+        create_times = []
+        update_times = []
+        delete_times = []
+        
+        # Run the complete CUD sequence for each sample
+        for sample in range(sample_size):
+            print(f"Sample {sample + 1}/{sample_size} for scope {scope}")
+            
+            # Clean benchmark data before each sample to ensure fresh data
+            cleanup_benchmark_data(db)
+            
+            # CREATE operation
+            if scope == 1:
+                create_query = generate_insert_one_query("players")
+            else:
+                create_query = generate_insert_many_query(scope, "players")
+            
+            create_result = execute_single_mongo_query(db, create_query)
+            create_times.append(create_result["execution_time"])
+            print(f"  CREATE: {create_result['execution_time']:.2f}ms, inserted {create_result['results_count']} records")
+            
+            # UPDATE operation (update some of the just-inserted records)
+            if scope == 1:
+                update_query = generate_update_one_query("players")
+            else:
+                update_query = generate_update_many_query(min(scope, 100), "players")  # Limit updates to reasonable number
+            
+            update_result = execute_single_mongo_query(db, update_query)
+            update_times.append(update_result["execution_time"])
+            print(f"  UPDATE: {update_result['execution_time']:.2f}ms, updated {update_result['results_count']} records")
+            
+            # DELETE operation (delete some of the records)
+            if scope == 1:
+                delete_query = generate_delete_one_query("players")
+            else:
+                delete_query = generate_delete_many_query(min(scope, 100), "players")  # Limit deletes to reasonable number
+            
+            delete_result = execute_single_mongo_query(db, delete_query)
+            delete_times.append(delete_result["execution_time"])
+            print(f"  DELETE: {delete_result['execution_time']:.2f}ms, deleted {delete_result['results_count']} records")
+        
+        # Create averaged results for each operation type
+        create_avg_result = create_average_result(
+            f"INSERT_{scope}", "players", "INSERT", create_times, scope
+        )
+        update_avg_result = create_average_result(
+            f"UPDATE_{min(scope, 100)}", "players", "UPDATE", update_times, min(scope, 100)
+        )
+        delete_avg_result = create_average_result(
+            f"DELETE_{min(scope, 100)}", "players", "DELETE", delete_times, min(scope, 100)
+        )
+        
+        results.extend([create_avg_result, update_avg_result, delete_avg_result])
+        
+        print(f"Scope {scope} completed:")
+        print(f"  CREATE avg: {create_avg_result['average_time_ms']:.2f}ms")
+        print(f"  UPDATE avg: {update_avg_result['average_time_ms']:.2f}ms") 
+        print(f"  DELETE avg: {delete_avg_result['average_time_ms']:.2f}ms")
     
     return results
 
@@ -418,3 +457,145 @@ def cleanup_benchmark_data(db: Database) -> None:
         
     except Exception as e:
         print(f"Error during MongoDB cleanup: {e}")
+
+def execute_single_mongo_query(db: Database, query: MongoQuery) -> Dict[str, Any]:
+    """
+    Execute a single MongoDB query and measure its performance.
+    
+    Args:
+        db: MongoDB database object
+        query: MongoQuery object containing the query details
+        
+    Returns:
+        Dictionary containing execution statistics for a single run
+    """
+    collection = db[query.collection]
+    results_count = 0
+    error_message = None
+    
+    try:
+        start_time = time.perf_counter()
+        
+        if query.operation == QueryType.FIND:
+            if query.options and "limit" in query.options:
+                cursor = collection.find(query.query or {}).limit(query.options["limit"])
+            else:
+                cursor = collection.find(query.query or {})
+            # Force execution by converting to list
+            result = list(cursor)
+            results_count = len(result)
+            
+        elif query.operation == QueryType.INSERT_ONE:
+            # Use upsert to avoid duplicate key errors
+            filter_query = query.query.copy()
+            if 'playerid' in filter_query:
+                filter_doc = {'playerid': filter_query['playerid']}
+            elif 'gameid' in filter_query:
+                filter_doc = {'gameid': filter_query['gameid']}
+            else:
+                filter_doc = filter_query
+            
+            result = collection.replace_one(filter_doc, query.query, upsert=True)
+            results_count = 1 if result.upserted_id or result.modified_count else 0
+            
+        elif query.operation == QueryType.INSERT_MANY:
+            # For insert_many, we'll need to handle duplicates differently
+            try:
+                result = collection.insert_many(query.query, ordered=False)
+                results_count = len(result.inserted_ids)
+            except Exception as e:
+                # If there are duplicate key errors, try to insert one by one with upsert
+                results_count = 0
+                for doc in query.query:
+                    try:
+                        if 'playerid' in doc:
+                            filter_doc = {'playerid': doc['playerid']}
+                        elif 'gameid' in doc:
+                            filter_doc = {'gameid': doc['gameid']}
+                        else:
+                            filter_doc = doc
+                        
+                        upsert_result = collection.replace_one(filter_doc, doc, upsert=True)
+                        if upsert_result.upserted_id or upsert_result.modified_count:
+                            results_count += 1
+                    except Exception:
+                        pass  # Skip individual failures
+            
+        elif query.operation == QueryType.UPDATE_ONE:
+            result = collection.update_one(query.query, query.update_doc)
+            results_count = result.modified_count
+            
+        elif query.operation == QueryType.UPDATE_MANY:
+            result = collection.update_many(query.query, query.update_doc)
+            results_count = result.modified_count
+            
+        elif query.operation == QueryType.DELETE_ONE:
+            result = collection.delete_one(query.query)
+            results_count = result.deleted_count
+            
+        elif query.operation == QueryType.DELETE_MANY:
+            result = collection.delete_many(query.query)
+            results_count = result.deleted_count
+            
+        elif query.operation == QueryType.AGGREGATE:
+            cursor = collection.aggregate(query.pipeline)
+            result = list(cursor)
+            results_count = len(result)
+        
+        end_time = time.perf_counter()
+        execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
+        
+    except PyMongoError as e:
+        error_message = str(e)
+        print(f"Error executing query '{query.name}': {error_message}")
+        execution_time = None
+        results_count = 0
+    except Exception as e:
+        error_message = str(e)
+        print(f"Unexpected error executing query '{query.name}': {error_message}")
+        execution_time = None
+        results_count = 0
+    
+    return {
+        "execution_time": execution_time,
+        "results_count": results_count,
+        "error": error_message
+    }
+
+def create_average_result(query_name: str, collection: str, operation: str, times: List[float], results_count: int) -> Dict[str, Any]:
+    """
+    Create a result dictionary with averaged execution times.
+    
+    Args:
+        query_name: Name of the query
+        collection: Collection name
+        operation: Operation type
+        times: List of execution times
+        results_count: Number of results affected/returned
+        
+    Returns:
+        Dictionary containing averaged execution statistics
+    """
+    valid_times = [t for t in times if t is not None]
+    
+    if valid_times:
+        avg_time = sum(valid_times) / len(valid_times)
+        min_time = min(valid_times)
+        max_time = max(valid_times)
+        error_message = None
+    else:
+        avg_time = min_time = max_time = None
+        error_message = "All executions failed"
+    
+    return {
+        "query_name": query_name,
+        "collection": collection,
+        "operation": operation,
+        "average_time_ms": avg_time,
+        "min_time_ms": min_time,
+        "max_time_ms": max_time,
+        "all_times_ms": valid_times,
+        "results_count": results_count,
+        "sample_size": len(times),
+        "error": error_message
+    }

@@ -103,7 +103,17 @@ def main() -> None:
         return
 
     # If no specific action is provided, show help
-    parser.print_help()
+    print("MongoDB Benchmark Tool")
+    print("=====================")
+    print()
+    print("Usage examples:")
+    print("  python mongodb_test.py --init                     # Initialize database")
+    print("  python mongodb_test.py --load 10000               # Load data with cap")
+    print("  python mongodb_test.py --check-connection         # Check connection")
+    print("  python mongodb_test.py --benchmark                # Run all benchmarks")
+    print("  python mongodb_test.py --benchmark-crud           # Run CRUD benchmarks only")
+    print("  python mongodb_test.py --benchmark-aggregation   # Run aggregation benchmarks only")
+    print("  python mongodb_test.py --benchmark --scopes \"10,100,1000\" # Custom scopes")
 
 
 if __name__ == '__main__':

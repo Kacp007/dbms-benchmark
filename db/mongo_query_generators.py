@@ -192,23 +192,22 @@ def generate_update_one_query(collection: str = "players") -> MongoQuery:
     Returns:
         MongoQuery object with the generated query
     """
-    # Target recent benchmark data (within last hour)
-    current_time = int(time.time() * 1000000)
-    hour_ago = current_time - 3600000000
-    
     if collection == "players":
+        # Target data that was just inserted by benchmark operations
         filter_query = {
             "$or": [
-                {"playerid": {"$gte": hour_ago}},
-                {"nickname": {"$regex": "^bench.*"}}
+                {"nickname": {"$regex": "^benchmark_user_.*"}},  # Match single insert
+                {"nickname": {"$regex": "^bench_user_.*"}},     # Match bulk inserts
+                {"country": "PL"},  # Match single insert country
+                {"country": "XX"}   # Match bulk insert country
             ]
         }
         update_doc = {"$set": {"nickname": "updated_user", "country": "YY"}}
     elif collection == "games":
         filter_query = {
             "$or": [
-                {"gameid": {"$gte": hour_ago}},
-                {"title": {"$regex": "^Benchmark.*"}}
+                {"title": {"$regex": "^Benchmark Game.*"}},     # Match inserted games
+                {"platform": "PC"}                             # Match inserted platform
             ]
         }
         update_doc = {"$set": {"title": "Updated Game", "platform": "PS5"}}
@@ -235,23 +234,21 @@ def generate_update_many_query(scope: int = 1000, collection: str = "players") -
     Returns:
         MongoQuery object with the generated query
     """
-    # Target recent benchmark data (within last hour) and pattern-based data
-    current_time = int(time.time() * 1000000)
-    hour_ago = current_time - 3600000000
-    
     if collection == "players":
         filter_query = {
             "$or": [
-                {"playerid": {"$gte": hour_ago}},
-                {"nickname": {"$regex": "^bench.*"}}
+                {"nickname": {"$regex": "^benchmark_user_.*"}},  # Match benchmark data
+                {"nickname": {"$regex": "^bench_user_.*"}},     # Match bulk insert data
+                {"country": "XX"},  # Match bulk insert country
+                {"country": "PL"}   # Match single insert country
             ]
         }
         update_doc = {"$set": {"nickname": "bulk_updated", "country": "ZZ"}}
     elif collection == "games":
         filter_query = {
             "$or": [
-                {"gameid": {"$gte": hour_ago}},
-                {"title": {"$regex": "^Benchmark.*"}}
+                {"title": {"$regex": "^Benchmark.*"}},  # Match benchmark games
+                {"platform": "PC"}  # Match inserted platform
             ]
         }
         update_doc = {"$set": {"title": "Bulk Updated Game", "platform": "XBOX"}}
@@ -277,26 +274,31 @@ def generate_delete_one_query(collection: str = "players") -> MongoQuery:
     Returns:
         MongoQuery object with the generated query
     """
-    # Target recent benchmark data (within last hour)
-    current_time = int(time.time() * 1000000)
-    hour_ago = current_time - 3600000000
-    
     if collection == "players":
+        # Target benchmark data that was just inserted
         filter_query = {
             "$or": [
-                {"playerid": {"$gte": hour_ago}},
-                {"nickname": {"$regex": "^bench.*"}}
+                {"nickname": {"$regex": "^benchmark_user_.*"}},  # Match benchmark users
+                {"nickname": {"$regex": "^bench_user_.*"}},     # Match bulk insert users
+                {"nickname": "updated_user"},                   # Match updated users
+                {"country": "PL"}                               # Match Polish users from inserts
             ]
         }
     elif collection == "games":
         filter_query = {
             "$or": [
-                {"gameid": {"$gte": hour_ago}},
-                {"title": {"$regex": "^Benchmark.*"}}
+                {"title": {"$regex": "^Benchmark Game.*"}},     # Match benchmark games
+                {"title": "Updated Game"},                      # Match updated games
+                {"platform": "PS5"}                            # Match updated platform
             ]
         }
     else:
-        filter_query = {"test_field": "updated_value"}
+        filter_query = {
+            "$or": [
+                {"test_field": "updated_value"},
+                {"test_field": {"$regex": "^test_value_.*"}}
+            ]
+        }
     
     return MongoQuery(
         name=f"Delete single document from {collection}",
@@ -316,28 +318,34 @@ def generate_delete_many_query(scope: int = 1000, collection: str = "players") -
     Returns:
         MongoQuery object with the generated query
     """
-    # Target recent benchmark data (within last hour) and pattern-based data
-    current_time = int(time.time() * 1000000)
-    hour_ago = current_time - 3600000000
-    
     if collection == "players":
+        # Target benchmark data that was inserted during testing
         filter_query = {
             "$or": [
-                {"playerid": {"$gte": hour_ago}},
-                {"nickname": {"$regex": "^bench.*"}},
-                {"nickname": "bulk_updated"}
+                {"nickname": {"$regex": "^benchmark_user_.*"}},  # Match benchmark users
+                {"nickname": {"$regex": "^bench_user_.*"}},     # Match bulk insert users
+                {"nickname": "bulk_updated"},                   # Match bulk updated users
+                {"country": "XX"},                              # Match users from bulk inserts
+                {"country": "YY"},                              # Match updated users
+                {"country": "ZZ"}                               # Match bulk updated users
             ]
         }
     elif collection == "games":
         filter_query = {
             "$or": [
-                {"gameid": {"$gte": hour_ago}},
-                {"title": {"$regex": "^Benchmark.*"}},
-                {"title": "Bulk Updated Game"}
+                {"title": {"$regex": "^Benchmark Game.*"}},     # Match benchmark games
+                {"title": "Bulk Updated Game"},                 # Match bulk updated games
+                {"platform": "XBOX"},                          # Match updated platform
+                {"platform": "PS5"}                            # Match updated platform
             ]
         }
     else:
-        filter_query = {"test_field": "bulk_updated"}
+        filter_query = {
+            "$or": [
+                {"test_field": "bulk_updated"},
+                {"test_field": {"$regex": "^test_value_.*"}}
+            ]
+        }
     
     return MongoQuery(
         name=f"Delete multiple documents from {collection}",

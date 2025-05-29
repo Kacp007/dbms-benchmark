@@ -103,7 +103,7 @@ INDEX_DDL: Final[str] = """
     CREATE INDEX IF NOT EXISTS idx_history_achievementid ON history(achievementid);
     CREATE INDEX IF NOT EXISTS idx_history_date ON history(date_acquired);
     CREATE INDEX IF NOT EXISTS idx_player_games_playerid ON player_games(playerid);
-    CREATE INDEX IF NOT EXISTS idx_player_games_game_id ON player_games(gameid);
+    CREATE INDEX IF NOT EXISTS idx_player_games_gameid ON player_games(gameid);
     CREATE INDEX IF NOT EXISTS idx_game_developers_game_id ON game_developers(game_id);
     CREATE INDEX IF NOT EXISTS idx_game_publishers_game_id ON game_publishers(game_id);
     CREATE INDEX IF NOT EXISTS idx_game_genres_game_id ON game_genres(game_id);
