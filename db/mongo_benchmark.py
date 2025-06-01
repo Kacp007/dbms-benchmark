@@ -397,6 +397,8 @@ def cleanup_benchmark_data(db: Database) -> None:
     
     This function removes any documents that might have been inserted during benchmarks
     to ensure clean benchmark runs and avoid duplicate key errors.
+    Note: This only removes data that was specifically inserted during benchmark tests,
+    not the main dataset.
     
     Args:
         db: MongoDB database object
@@ -410,6 +412,9 @@ def cleanup_benchmark_data(db: Database) -> None:
         # Remove data from the last 2 hours (7200 seconds = 7200000000 microseconds)
         two_hours_ago = current_time - 7200000000
         
+        # Only log if we actually find documents to remove
+        total_removed = 0
+        
         # Players: Remove benchmark users (playerid >= two_hours_ago or contains benchmark patterns)
         players_result = db.players.delete_many({
             "$or": [
@@ -418,7 +423,9 @@ def cleanup_benchmark_data(db: Database) -> None:
                 {"nickname": {"$regex": "^benchmark.*"}}
             ]
         })
-        print(f"Removed {players_result.deleted_count} benchmark player documents")
+        if players_result.deleted_count > 0:
+            print(f"Removed {players_result.deleted_count} benchmark player documents")
+            total_removed += players_result.deleted_count
         
         # Games: Remove benchmark games  
         games_result = db.games.delete_many({
@@ -427,33 +434,46 @@ def cleanup_benchmark_data(db: Database) -> None:
                 {"title": {"$regex": "^Benchmark.*"}}
             ]
         })
-        print(f"Removed {games_result.deleted_count} benchmark game documents")
+        if games_result.deleted_count > 0:
+            print(f"Removed {games_result.deleted_count} benchmark game documents")
+            total_removed += games_result.deleted_count
         
         # Achievements: Remove any benchmark achievements
         achievements_result = db.achievements.delete_many({
             "gameid": {"$gte": two_hours_ago}
         })
-        print(f"Removed {achievements_result.deleted_count} benchmark achievement documents")
+        if achievements_result.deleted_count > 0:
+            print(f"Removed {achievements_result.deleted_count} benchmark achievement documents")
+            total_removed += achievements_result.deleted_count
         
         # Prices: Remove any benchmark prices
         prices_result = db.prices.delete_many({
             "gameid": {"$gte": two_hours_ago}
         })
-        print(f"Removed {prices_result.deleted_count} benchmark price documents")
+        if prices_result.deleted_count > 0:
+            print(f"Removed {prices_result.deleted_count} benchmark price documents")
+            total_removed += prices_result.deleted_count
         
         # History: Remove any benchmark history
         history_result = db.history.delete_many({
             "playerid": {"$gte": two_hours_ago}
         })
-        print(f"Removed {history_result.deleted_count} benchmark history documents")
+        if history_result.deleted_count > 0:
+            print(f"Removed {history_result.deleted_count} benchmark history documents")
+            total_removed += history_result.deleted_count
         
         # Player_games: Remove any benchmark relationships
         player_games_result = db.player_games.delete_many({
             "playerid": {"$gte": two_hours_ago}
         })
-        print(f"Removed {player_games_result.deleted_count} benchmark player_games documents")
+        if player_games_result.deleted_count > 0:
+            print(f"Removed {player_games_result.deleted_count} benchmark player_games documents")
+            total_removed += player_games_result.deleted_count
         
-        print("MongoDB benchmark data cleanup completed.")
+        if total_removed > 0:
+            print(f"MongoDB benchmark data cleanup completed. Total removed: {total_removed} documents.")
+        else:
+            print("MongoDB benchmark data cleanup completed. No benchmark test data found to remove.")
         
     except Exception as e:
         print(f"Error during MongoDB cleanup: {e}")

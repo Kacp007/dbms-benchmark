@@ -7,7 +7,7 @@ import argparse
 from typing import Optional, List
 
 # Import modules from the db package
-from db.mongo_connection import create_database, check_connection, get_mongo_database
+from db.mongo_connection import create_database, check_connection, get_mongo_database, drop_database
 from db.mongo_schema import create_indexes, validate_collection_data
 from db.mongo_data_loader import load_all
 from db.mongo_benchmark import run_all_benchmarks, run_crud_benchmarks, run_aggregation_benchmarks, RESULTS_FILE, CSV_RESULTS_FILE
@@ -20,8 +20,11 @@ def main() -> None:
     """
     parser = argparse.ArgumentParser(description='MongoDB benchmark tool - Load data and run performance tests')
     parser.add_argument('--init', action='store_true', help='Initialize database (create database and indexes)')
-    parser.add_argument('--load', nargs='?', const=100000000, type=int, metavar='DATA_CAP', 
+    parser.add_argument('--drop', action='store_true', help='Drop the benchmark database')
+    parser.add_argument('--load', nargs='?', const=100000000, type=int, metavar='DATA_CAP',
                         help='Load data into the database with optional row limit (default: 100000000)')
+    parser.add_argument('--use-batching', action='store_true', 
+                        help='Use batch operations for faster loading (may affect benchmark results)')
     parser.add_argument('--check-connection', action='store_true', help='Check only database connection')
     
     # Benchmark options
@@ -44,26 +47,31 @@ def main() -> None:
             print(f"Using custom scopes: {scopes}")
         except ValueError:
             print(f"Error parsing scopes '{args.scopes}'. Using default scopes.")
-    
-    # Default scopes for CRUD benchmarks if not specified
+      # Default scopes for CRUD benchmarks if not specified
     default_crud_scopes = [10, 100, 1000, 10000, 100000]
 
     if args.check_connection:
         check_connection()
         return
 
+    if args.drop:
+        print("Dropping MongoDB database...")
+        drop_database()
+        print("Database dropped successfully.")
+        return
+
     if args.init:
         print("Initializing MongoDB database...")
         create_database()
         db = get_mongo_database()
-        create_indexes(db)
+        create_indexes(db)        
         print("Database initialization completed.")
         return
 
     if args.load is not None:
-        print(f"Loading data (cap: {args.load})...")
+        print(f"Loading data (cap: {args.load}, batching: {args.use_batching})...")
         db = get_mongo_database()
-        results = load_all(db, data_cap=args.load)
+        results = load_all(db, data_cap=args.load, use_batching=args.use_batching)
         print("Data loading completed.")
         
         # Validate data after loading

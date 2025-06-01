@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pymongo.database import Database
 from pymongo.collection import Collection
-from pymongo import InsertOne
+from pymongo import InsertOne, ReplaceOne, ReplaceOne
 
 from db.mongo_connection import get_abs_path
 
@@ -61,7 +61,7 @@ def parse_csv_value(value: str, field_type: str = 'string') -> Any:
     else:
         return value
 
-def load_players(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None) -> int:
+def load_players(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None, use_batching: bool = False) -> int:
     """Load players data from CSV into MongoDB."""
     print("Loading players data...")
     
@@ -73,6 +73,7 @@ def load_players(db: Database, data_folder="data/cleaned", data_cap: Optional[in
     
     documents = []
     count = 0
+    batch_size = 10000 if use_batching else float('inf')
     
     with open(file_path, 'r', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -88,11 +89,12 @@ def load_players(db: Database, data_folder="data/cleaned", data_cap: Optional[in
             documents.append(document)
             count += 1
             
-            # Batch insert every 10000 documents
-            if len(documents) >= 10000:
+            # Batch insert based on batch_size
+            if len(documents) >= batch_size:
                 collection.insert_many(documents)
                 documents = []
-                print(f"Inserted {count:,} players...")
+                if use_batching:
+                    print(f"Inserted {count:,} players...")
     
     # Insert remaining documents
     if documents:
@@ -101,7 +103,7 @@ def load_players(db: Database, data_folder="data/cleaned", data_cap: Optional[in
     print(f"Loaded {count:,} players.")
     return count
 
-def load_games(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None) -> int:
+def load_games(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None, use_batching: bool = False) -> int:
     """Load games data from CSV into MongoDB."""
     print("Loading games data...")
     
@@ -113,6 +115,7 @@ def load_games(db: Database, data_folder="data/cleaned", data_cap: Optional[int]
     
     documents = []
     count = 0
+    batch_size = 10000 if use_batching else float('inf')
     
     with open(file_path, 'r', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -133,11 +136,12 @@ def load_games(db: Database, data_folder="data/cleaned", data_cap: Optional[int]
             documents.append(document)
             count += 1
             
-            # Batch insert every 10000 documents
-            if len(documents) >= 10000:
+            # Batch insert based on batch_size
+            if len(documents) >= batch_size:
                 collection.insert_many(documents)
                 documents = []
-                print(f"Inserted {count:,} games...")
+                if use_batching:
+                    print(f"Inserted {count:,} games...")
     
     # Insert remaining documents
     if documents:
@@ -146,7 +150,7 @@ def load_games(db: Database, data_folder="data/cleaned", data_cap: Optional[int]
     print(f"Loaded {count:,} games.")
     return count
 
-def load_achievements(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None) -> int:
+def load_achievements(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None, use_batching: bool = False) -> int:
     """Load achievements data from CSV into MongoDB."""
     print("Loading achievements data...")
     
@@ -158,6 +162,7 @@ def load_achievements(db: Database, data_folder="data/cleaned", data_cap: Option
     
     documents = []
     count = 0
+    batch_size = 10000 if use_batching else float('inf')
     
     with open(file_path, 'r', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -175,11 +180,12 @@ def load_achievements(db: Database, data_folder="data/cleaned", data_cap: Option
             documents.append(document)
             count += 1
             
-            # Batch insert every 10000 documents
-            if len(documents) >= 10000:
+            # Batch insert based on batch_size
+            if len(documents) >= batch_size:
                 collection.insert_many(documents)
                 documents = []
-                print(f"Inserted {count:,} achievements...")
+                if use_batching:
+                    print(f"Inserted {count:,} achievements...")
     
     # Insert remaining documents
     if documents:
@@ -188,7 +194,7 @@ def load_achievements(db: Database, data_folder="data/cleaned", data_cap: Option
     print(f"Loaded {count:,} achievements.")
     return count
 
-def load_history(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None) -> int:
+def load_history(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None, use_batching: bool = False) -> int:
     """Load history data from CSV into MongoDB."""
     print("Loading history data...")
     
@@ -200,6 +206,7 @@ def load_history(db: Database, data_folder="data/cleaned", data_cap: Optional[in
     
     documents = []
     count = 0
+    batch_size = 10000 if use_batching else float('inf')
     
     with open(file_path, 'r', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -215,11 +222,12 @@ def load_history(db: Database, data_folder="data/cleaned", data_cap: Optional[in
             documents.append(document)
             count += 1
             
-            # Batch insert every 10000 documents
-            if len(documents) >= 10000:
+            # Batch insert based on batch_size
+            if len(documents) >= batch_size:
                 collection.insert_many(documents)
                 documents = []
-                print(f"Inserted {count:,} history records...")
+                if use_batching:
+                    print(f"Inserted {count:,} history records...")
     
     # Insert remaining documents
     if documents:
@@ -228,7 +236,7 @@ def load_history(db: Database, data_folder="data/cleaned", data_cap: Optional[in
     print(f"Loaded {count:,} history records.")
     return count
 
-def load_prices(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None) -> int:
+def load_prices(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None, use_batching: bool = False) -> int:
     """Load prices data from CSV into MongoDB."""
     print("Loading prices data...")
     
@@ -240,6 +248,7 @@ def load_prices(db: Database, data_folder="data/cleaned", data_cap: Optional[int
     
     documents = []
     count = 0
+    batch_size = 10000 if use_batching else float('inf')
     
     with open(file_path, 'r', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -259,11 +268,12 @@ def load_prices(db: Database, data_folder="data/cleaned", data_cap: Optional[int
             documents.append(document)
             count += 1
             
-            # Batch insert every 10000 documents
-            if len(documents) >= 10000:
+            # Batch insert based on batch_size
+            if len(documents) >= batch_size:
                 collection.insert_many(documents)
                 documents = []
-                print(f"Inserted {count:,} prices...")
+                if use_batching:
+                    print(f"Inserted {count:,} prices...")
     
     # Insert remaining documents
     if documents:
@@ -272,8 +282,8 @@ def load_prices(db: Database, data_folder="data/cleaned", data_cap: Optional[int
     print(f"Loaded {count:,} prices.")
     return count
 
-def load_purchased_games(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None) -> int:
-    """Load purchased games (player_games) data from CSV into MongoDB."""
+def load_purchased_games(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None, use_batching: bool = False) -> int:
+    """Load purchased games (player_games) data from CSV into MongoDB using upserts to handle duplicates."""
     print("Loading purchased games data...")
     
     file_path = get_abs_path(f'{data_folder}/player_games_cleaned.csv')
@@ -284,6 +294,7 @@ def load_purchased_games(db: Database, data_folder="data/cleaned", data_cap: Opt
     
     documents = []
     count = 0
+    batch_size = 10000 if use_batching else float('inf')
     
     with open(file_path, 'r', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
@@ -292,26 +303,46 @@ def load_purchased_games(db: Database, data_folder="data/cleaned", data_cap: Opt
                 break
                 
             # The cleaned file already has playerid,gameid columns - no JSON parsing needed
-            document = {
-                'playerid': parse_csv_value(row['playerid'], 'int'),
-                'gameid': parse_csv_value(row['gameid'], 'int')
-            }
-            documents.append(document)
-            count += 1
+            playerid = parse_csv_value(row['playerid'], 'int')
+            gameid = parse_csv_value(row['gameid'], 'int')
             
-            # Batch insert every 10000 documents
-            if len(documents) >= 10000:
-                collection.insert_many(documents)
-                documents = []
-                print(f"Inserted {count:,} player-game relationships...")
+            document = {
+                'playerid': playerid,
+                'gameid': gameid
+            }
+            
+            if use_batching:
+                documents.append(document)
+                count += 1
+                  # Batch upsert every batch_size documents
+                if len(documents) >= batch_size:
+                    _upsert_player_games_batch(collection, documents)
+                    documents = []
+                    print(f"Inserted {count:,} player-game relationships...")
+            else:                # Individual upsert - avoids batching that could skew benchmarks
+                filter_doc = {'playerid': playerid, 'gameid': gameid}
+                collection.replace_one(filter_doc, document, upsert=True)
+                count += 1
+                
+                if count % 100000 == 0:  # Progress reporting only
+                    print(f"Inserted {count:,} player-game relationships...")
     
-    # Insert remaining documents
-    if documents:
-        collection.insert_many(documents)
+    # Handle remaining documents in batch mode
+    if use_batching and documents:
+        _upsert_player_games_batch(collection, documents)
     
-    print(f"Loaded {count:,} player-game relationships.")
+    print(f"Inserted {count:,} player-game relationships using {'batched' if use_batching else 'individual'} upserts.")
     return count
-    return count
+
+def _upsert_player_games_batch(collection: Collection, documents: List[Dict[str, Any]]) -> None:
+    """Helper function to perform batch upserts for player_games collection."""
+    operations = []
+    for doc in documents:
+        filter_doc = {'playerid': doc['playerid'], 'gameid': doc['gameid']}
+        operations.append(ReplaceOne(filter_doc, doc, upsert=True))
+    
+    if operations:
+        collection.bulk_write(operations, ordered=False)
 
 def load_normalized_game_data(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None) -> Dict[str, int]:
     """
@@ -471,7 +502,7 @@ def load_normalized_game_data(db: Database, data_folder="data/cleaned", data_cap
     print(f"Normalized game data loading completed from {count:,} games.")
     return results
 
-def load_all(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None) -> Dict[str, int]:
+def load_all(db: Database, data_folder="data/cleaned", data_cap: Optional[int] = None, use_batching: bool = False) -> Dict[str, int]:
     """
     Load all CSV data into MongoDB collections.
     
@@ -479,21 +510,23 @@ def load_all(db: Database, data_folder="data/cleaned", data_cap: Optional[int] =
         db: MongoDB database object
         data_folder: Folder containing CSV files (default: "data/cleaned")
         data_cap: Optional limit on number of records to load per table
+        use_batching: Whether to use batching (True) or individual operations (False)
+                     Individual operations avoid skewing benchmark results but are slower
         
     Returns:
         Dictionary with collection names and record counts
     """
-    print(f"Loading all data into MongoDB from {data_folder} (cap: {data_cap or 'unlimited'})...")
+    print(f"Loading all data into MongoDB from {data_folder} (cap: {data_cap or 'unlimited'}, batching: {use_batching})...")
     
     results = {}
     
     try:
-        results['players'] = load_players(db, data_folder, data_cap)
-        results['games'] = load_games(db, data_folder, data_cap)
-        results['achievements'] = load_achievements(db, data_folder, data_cap)
-        results['history'] = load_history(db, data_folder, data_cap)
-        results['prices'] = load_prices(db, data_folder, data_cap)
-        results['player_games'] = load_purchased_games(db, data_folder, data_cap)
+        results['players'] = load_players(db, data_folder, data_cap, use_batching)
+        results['games'] = load_games(db, data_folder, data_cap, use_batching)
+        results['achievements'] = load_achievements(db, data_folder, data_cap, use_batching)
+        results['history'] = load_history(db, data_folder, data_cap, use_batching)
+        results['prices'] = load_prices(db, data_folder, data_cap, use_batching)
+        results['player_games'] = load_purchased_games(db, data_folder, data_cap, use_batching)
         
         # Load normalized game data (developers, publishers, genres, etc.)
         normalized_results = load_normalized_game_data(db, data_folder, data_cap)
