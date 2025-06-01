@@ -8,13 +8,11 @@ services:
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: admin
       MONGO_INITDB_DATABASE: benchmarkdb
     volumes:
       - mongodb_data:/data/db
       - ./mongo-init:/docker-entrypoint-initdb.d/
-    command: mongod --storageEngine wiredTiger --wiredTigerCacheSizeGB 2
+    command: mongod --storageEngine wiredTiger --wiredTigerCacheSizeGB 2 --noauth
 
 volumes:
   mongodb_data:

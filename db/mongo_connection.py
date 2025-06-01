@@ -13,9 +13,6 @@ from pymongo.collection import Collection
 MONGO_CONFIG: Dict[str, Union[str, int]] = {
     'host': 'localhost',
     'port': 27017,
-    'username': 'admin',
-    'password': 'admin',
-    'authSource': 'admin'
 }
 
 TARGET_DB: str = 'benchmarkdb'
